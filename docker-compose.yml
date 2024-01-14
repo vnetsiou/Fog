@@ -1,0 +1,168 @@
+version: '3.9'
+
+services:
+  zookeeper:
+      image: confluentinc/cp-zookeeper:7.2.1
+      container_name: zookeeper
+      environment:
+        ZOOKEEPER_CLIENT_PORT: 2181
+      networks:
+      - default
+
+  kafka:
+    image: confluentinc/cp-kafka:7.2.1
+    container_name: kafka
+    ports:
+      - "8097:8097"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:8097,INTERNAL://kafka:19092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+    networks:
+     - default
+    restart: on-failure
+    healthcheck:
+        test: ["CMD", "ping", "-c","1", "localhost:8097"]
+        interval: 30s
+        timeout: 10s
+        retries: 5
+
+  control-center:
+      image: confluentinc/cp-enterprise-control-center:latest
+      hostname: control-center
+      depends_on:
+        - kafka
+      ports:
+        - "9021:9021"
+      expose:
+        - 9021
+      environment:
+        CONTROL_CENTER_BOOTSTRAP_SERVERS: 'kafka:19092'
+        CONTROL_CENTER_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+        CONTROL_CENTER_REPLICATION_FACTOR: 1
+        PORT: 9021
+      networks:
+      - default
+      restart: always
+
+  mysql-kc:
+    container_name: mysql-kc
+    image: mysql
+    ports:
+      - 3306:3306
+    restart: unless-stopped
+    environment:
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: admin
+      MYSQL_DATABASE: keycloak_db
+      # Self-Explanatory
+      MYSQL_ROOT_PASSWORD: admin
+    volumes:
+      - keycloak-and-mysql-volume-v1:/var/lib/mysql
+    networks:
+      - keycloak-and-mysql-network
+
+  keycloak-w:
+    image: jboss/keycloak
+    ports:
+      - 8182:8080
+    restart: unless-stopped
+    environment:
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: admin
+      KEYCLOAK_WEB_ORIGINS: http://localhost:80
+      DB_VENDOR: mysql
+      DB_ADDR: mysql-kc
+      DB_PORT: 3306
+      DB_USER: admin
+      DB_PASSWORD: admin
+      DB_DATABASE: keycloak_db
+    depends_on:
+      - mysql-kc
+    volumes:
+      - keycloak-realm-data:/opt/jboss/keycloak/standalone/data 
+    networks:
+      - keycloak-and-mysql-network
+
+  orders_db: 
+    container_name: orders_db
+    image: mysql
+    restart: always
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_DATABASE: orders_db
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: admin
+      MYSQL_ROOT_PASSWORD: admin
+    networks:
+      - orders
+    ports: 
+      - '3308:3306'
+    expose:
+      - '3308'
+    volumes:
+      - ./data2/orders-db:/var/lib/mysql   
+
+  
+  products_db:
+    container_name: products_db
+    image: mysql:5.7
+    restart: always
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_DATABASE: products_db
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: admin
+      MYSQL_ROOT_PASSWORD: admin
+    networks:
+      - products
+    ports:
+      - '3310:3306'
+    expose:
+      - '3310'
+    volumes:
+      - ./data2/products-db:/var/lib/mysql
+
+
+  web:
+    build: ./backend/web
+    ports:
+      - 8080:80
+    volumes:
+      - ./frontend/src:/var/www/html/
+    environment:
+      - MYSQL_USER=admin
+      - MYSQL_PASSWORD=admin  
+      - MYSQL_ROOT_PASSWORD=admin
+    networks:
+      - orders
+      - products
+
+
+networks:
+  products:
+      driver: bridge
+  default:
+      driver: bridge
+  orders:
+      driver: bridge
+  keycloak-and-mysql-network:
+
+volumes:
+  keycloak-and-mysql-volume-v1:
+  keycloak-vol:
+  keycloak-realm-data:
+  orders-db:
+  products-db:
+  mysql_data:
+  
